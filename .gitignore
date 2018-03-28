@@ -1,0 +1,10 @@
+## some experiment files I don't want to track
+run_wsj_etc.sh
+run_ls_ted.sh
+## data, experiemnts and RESULTS files
+s5/data
+s5/exp
+RESULTS_marta
+## log output files
+*.out
+*.log
