@@ -9,7 +9,6 @@ s5/mfcc
 m5/data
 m5/exp
 m5/mfcc
-m5
 RESULTS_marta
 ## log output files
 *.out
