@@ -24,23 +24,26 @@ if [ $? -ne 0 ]; then
 fi
 
 # general options
-stage=9
+stage=11
 cleanup_stage=1
 multi=multi_m  # This defines the "variant" we're using; see README.md
 #srilm_opts="-subset -prune-lowprobs -unk -tolower -order 3"
+combine_data=false
 train_mono=false
 train=false
-decode=true
+decode=false
+decode_ls=true
+
 
 . utils/parse_options.sh
 
 # Prepare corpora 
-if [ $stage -le 0 ]; then
+if [ $stage -eq 0 ]; then
   mkdir -p data/local
   # librispeech
   local/librispeech_data_prep.sh $librispeech/LibriSpeech/train-clean-100 data/librispeech_100/train
-  #local/librispeech_data_prep.sh $librispeech/LibriSpeech/train-clean-360 data/librispeech_360/train
-  #local/librispeech_data_prep.sh $librispeech/LibriSpeech/train-other-500 data/librispeech_500/train
+  local/librispeech_data_prep.sh $librispeech/LibriSpeech/train-clean-360 data/librispeech_360/train
+  local/librispeech_data_prep.sh $librispeech/LibriSpeech/train-other-500 data/librispeech_500/train
   local/librispeech_data_prep.sh $librispeech/LibriSpeech/test-clean data/librispeech/test
   # tedlium
   #local/tedlium_prepare_data.sh $tedlium2
@@ -54,7 +57,7 @@ if [ $stage -le 0 ]; then
 fi
 
 # Normalize transcripts
-if [ $stage -le 1 ]; then
+if [ $stage -eq 1 ]; then
   for f in data/*/{train,test}/text; do
   #for f in data/wsj/test/text; do
     echo Normalizing $f
@@ -64,14 +67,14 @@ if [ $stage -le 1 ]; then
 fi
 
 # These commands(stages:2-4) build a dictionary containing the combination of
-# many of the OOVs in the WSJ LM training (not yet:data and the Librispeech data),
+# many of the OOVs in the WSJ LM training data (excluded for now: and the Librispeech data),
 # and trains an LM directly on that data 
 
 # Prepare the basic dictionary (a combination of wsj+librispeech-CMU lexicons) in data/local/dict_combined.
 # And prepare Language Model
-if [ $stage -le 2 ]; then
+if [ $stage -eq 2 ]; then
   # We prepare the basic dictionary in data/local/dict_combined.
-  local/prepare_dict_new_wsj_ls.sh $wsj1 $librispeech
+  local/new_prepare_dict.sh $wsj1 $librispeech
 fi
 
 # We'll do multiple iterations of pron/sil-prob estimation. So the structure of
@@ -84,7 +87,8 @@ lang_root=data/lang
 dict_dir=${dict_root}_nosp
 lang_dir=${lang_root}_nosp
 
-if [ $stage -le 3 ]; then
+# Prepare Lang Directories
+if [ $stage -eq 3 ]; then
   # Copy necessary phone files to dict directories
   mkdir -p $dict_dir
   rm $dict_dir/lexiconp.txt 2>/dev/null || true
@@ -97,33 +101,23 @@ if [ $stage -le 3 ]; then
   echo 'End of stage 3'
 fi
 
-if [ $stage -le 4 ]; then
+if [ $stage -eq 4 ]; then
   # Setup LM directory
   lm_dir=data/local/lm
   mkdir -p $lm_dir
 
   # build LM and prepare test lang directories
-  local/wsj_train_lms.sh $lm_dir $dict_dir
-  local/wsj_format_local_lms.sh $lm_dir $lang_dir
+  local/new_wsj_train_lms.sh $lm_dir $dict_dir
+  local/new_wsj_format_local_lms.sh $lm_dir $lang_dir
 
   echo 'End of stage 4'
 fi
 
 #exit 0
 
-# prepare LM and test lang directory
-if [ $stage -le -24 ]; then
-  mkdir -p data/local/lm
-  cat data/{wsj,librispeech_*}/train/text > data/local/lm/text
-  local/train_lms.sh  # creates data/local/lm/3gram-mincount/lm_unpruned.gz
-  utils/format_lm_sri.sh --srilm-opts "$srilm_opts" \
-    ${lang_root}_nosp data/local/lm/3gram-mincount/lm_unpruned.gz \
-    ${dict_root}_nosp/lexicon.txt ${lang_root}_nosp_test_tg
-fi
-
 # prepare training data for experiments
-if [ $stage -le 5 ]; then
-  corpora="wsj librispeech_100" #librispeech_360 librispeech_500 wsj" #tedlium"
+if [ $stage -eq 5 ]; then
+  corpora="librispeech_360 librispeech_500" #wsj librispeech_100 librispeech_360" #librispeech_500 wsj" #tedlium"
 
   # make training features
   mfccdir=mfcc
@@ -155,7 +149,7 @@ if [ $stage -le 5 ]; then
 fi
 
 # prepare test data for experiments
-if [ $stage -le 6 ]; then
+if [ $stage -eq 6 ]; then
   corpora="wsj librispeech"
 
   # make test features
@@ -178,7 +172,7 @@ if [ $stage -le 6 ]; then
   echo 'End of stage 6'
 fi
 
-if [ $stage -le 7 ]; then
+if [ $stage -eq 7 ]; then
   # Make small subsets of wsj data for early stage training.
   # 1 Make subset of wsj train data (=train_si284)
   # 2 Make subset with the shortest 2k utterances from si-84.
@@ -201,52 +195,31 @@ if [ $stage -le 7 ]; then
 fi
 
 # (original) train mono on wsj 10k short (nodup)
-# train mono on si84_2kshort (first and last monophone pass)
-if [ $stage -le 8 ]; then
-  data_train_wsj=data/wsj/train_si84_2kshort
-  data_train_librispeech=data/librispeech_100/train_2kshort
+# train mono on si84_2kshort
+if [ $stage -eq 8 ]; then
+  data_train=data/wsj/train_si84_2kshort
   if $train_mono; then
-    #local/make_partitions_wsj_etc.sh --multi $multi --stage 1 || exit 1;
     # Train with wsj data
     steps/train_mono.sh --boost-silence 1.25 --nj 10 --cmd "$train_cmd" \
-      $data_train_wsj ${lang_root}_nosp exp/$multi/mono_wsj || exit 1;
-    # Train mono with librispeech data
-    #steps/train_mono.sh --boost-silence 1.25 --nj 10 --cmd "$train_cmd" \
-    #  $data_train_librispeech ${lang_root}_nosp exp/$multi/mono_ls || exit 1;
+      $data_train ${lang_root}_nosp exp/$multi/mono || exit 1;
   fi
-
-  if $train; then
-    # Train first trigram on librispeech data
-    steps/align_si.sh --boost-silence 1.25 --nj 10 --cmd "$train_cmd" \
-      $data_train_librispeech ${lang_root}_nosp exp/$multi/mono_wsj exp/$multi/mono_ls_ali || exit 1;
-    steps/train_deltas.sh --boost-silence 1.25 --cmd "$train_cmd" 2000 10000 \
-      $data_train_librispeech ${lang_root}_nosp exp/$multi/mono_ls_ali exp/$multi/tri0 || exit 1;
-  fi
-
   echo 'End of stage 8'
 fi
 
 # (original) train tri1a and tri1b (first and second triphone passes) on wsj 30k (nodup)
 # train tri1 on si84_half (1st triphone pass)
-if [ $stage -le 9 ]; then
-  data_train_wsj=data/wsj/train_si84_half
-  data_train_librispeech=data/librispeech_100/train_5k
+if [ $stage -eq 9 ]; then
+  data_train=data/wsj/train_si84_half
   if $train; then
-    #local/make_partitions_wsj_etc.sh --multi $multi --stage 2 || exit 1;
-    steps/align_si.sh --boost-silence 1.25 --nj 10 --cmd "$train_cmd" \
-      $data_train_wsj ${lang_root}_nosp exp/$multi/tri0 exp/$multi/tri0_ali || exit 1; 
-   steps/train_deltas.sh --boost-silence 1.25 --cmd "$train_cmd" 2000 10000 \
-      $data_train_wsj ${lang_root}_nosp exp/$multi/tri0_ali exp/$multi/tri1a || exit 1;
-
    steps/align_si.sh --boost-silence 1.25 --nj 10 --cmd "$train_cmd" \
-      $data_train_librispeech ${lang_root}_nosp exp/$multi/tri1a exp/$multi/tri1a_ali || exit 1;
+      $data_train ${lang_root}_nosp exp/$multi/mono exp/$multi/mono_ali || exit 1;
    steps/train_deltas.sh --boost-silence 1.25 --cmd "$train_cmd" 2000 10000 \
-      $data_train_librispeech ${lang_root}_nosp exp/$multi/tri1a_ali exp/$multi/tri1b || exit 1;
+      $data_train ${lang_root}_nosp exp/$multi/mono_ali exp/$multi/tri1 || exit 1;
   fi
 
   # decode
   if $decode; then
-    gmm=tri1b
+    gmm=tri1
     graph_dir=exp/$multi/$gmm/graph_tgpr
     utils/mkgraph.sh ${lang_root}_nosp_test_tgpr \
       exp/$multi/$gmm $graph_dir || exit 1;
@@ -262,14 +235,13 @@ fi
 
 
 # (original) train tri2 (third triphone pass) on wsj 100k (nodup)
-# train tri2 on train_si84 (2nd triphone pass)
+# train tri2b on train_si84 (2nd triphone pass)
 if [ $stage -eq 10 ]; then
   data_train=data/wsj/train_si84
-  #local/make_partitions_wsj_etc.sh --multi $multi --stage 3 || exit 1;
   steps/align_si.sh --boost-silence 1.25 --nj 10 --cmd "$train_cmd" \
     $data_train ${lang_root}_nosp exp/$multi/tri1 exp/$multi/tri1_ali || exit 1;
   steps/train_deltas.sh --boost-silence 1.25 --cmd "$train_cmd" 2500 15000 \
-    $data_train ${lang_root}_nosp exp/$multi/tri1_ali exp/$multi/tri2 || exit 1;
+    $data_train ${lang_root}_nosp exp/$multi/tri1_ali exp/$multi/tri2b || exit 1;
   # copied from wsj original training
   #steps/train_lda_mllt.sh --cmd "$train_cmd" \
   #    --splice-opts "--left-context=3 --right-context=3" 2500 15000 \
@@ -279,21 +251,19 @@ if [ $stage -eq 10 ]; then
 fi
 
 # (original) train tri3a (4th triphone pass) on whole wsj
-# train tri2 on train (=train_si284) (3rd triphone pass)
-if [ $stage -eq 11 ]; then
+# train tri3b on train, whole wsj (=train_si284) (3rd triphone pass)
+if [ $stage -le 11 ]; then
   data_train=data/wsj/train
-  #local/make_partitions_wsj_etc.sh --multi $multi --stage 4 || exit 1;
-  steps/align_si.sh --boost-silence 1.25 --nj 10 --cmd "$train_cmd" \
-    $data_train ${lang_root}_nosp exp/$multi/tri2 exp/$multi/tri2_ali || exit 1;
-  steps/train_deltas.sh --boost-silence 1.25 --cmd "$train_cmd" 4200 40000 \
-    $data_train ${lang_root}_nosp exp/$multi/tri2_ali exp/$multi/tri3a || exit 1;
-  # copied from wsj original training
-  #steps/train_sat.sh --cmd "$train_cmd" 4200 40000 \
-  #  $data_train ${lang_root}_nosp exp/$multi/tri2_ali exp/$multi/tri3a || exit 1;
 
-  # decode
+  if $train; then
+    steps/align_si.sh --boost-silence 1.25 --nj 10 --cmd "$train_cmd" \
+      $data_train ${lang_root}_nosp exp/$multi/tri2b exp/$multi/tri2b_ali || exit 1;
+    steps/train_deltas.sh --boost-silence 1.25 --cmd "$train_cmd" 4200 40000 \
+      $data_train ${lang_root}_nosp exp/$multi/tri2b_ali exp/$multi/tri3b || exit 1;
+  fi
+
   if $decode; then
-    gmm=tri3a
+    gmm=tri3b
     graph_dir=exp/$multi/$gmm/graph_tgpr
     utils/mkgraph.sh ${lang_root}_nosp_test_tgpr \
       exp/$multi/$gmm $graph_dir || exit 1;
@@ -304,47 +274,147 @@ if [ $stage -eq 11 ]; then
         data/$e/test exp/$multi/$gmm/decode_tgpr_$e || exit 1;
     done
   fi
+
+  if $decode_ls; then
+    # Train SAT on whole wsj
+    #steps/train_sat.sh --cmd "$train_cmd" 4200 40000 \
+    #  $data_train ${lang_root}_nosp exp/$multi/tri2b_ali exp/$multi/tri3b_sat || exit 1;
+
+    # Prepare librispeech fglarge LM
+    #ls_lmtype=_libri
+    #local/librispeech_prepare_lm.sh $ls_lmtype 
+
+    # mkgraph and decode using SAT(si284) and fglarge
+    gmm=tri3b_sat
+    exp_dir=exp/$multi/$gmm
+    lmcode=_libri
+    libri_dir=../../librispeech/s5
+    e=librispeech
+    # use lang from librispeech directories
+    utils/mkgraph.sh $libri_dir/data/lang_nosp_test_tgsmall \
+      $exp_dir $exp_dir/graph_nosp${lmcode}_tgsmall
+    steps/decode_fmllr.sh --nj 20 --cmd "$decode_cmd" \
+      $exp_dir/graph_nosp${lmcode}_tgsmall data/$e/test  \
+      $exp_dir/decode${lmcode}_tgsmall_$e
+    steps/lmrescore.sh --cmd "$decode_cmd" $libri_dir/data/lang_nosp_test_{tgsmall,tgmed} \
+      data/$e/test  $exp_dir/decode${lmcode}_{tgsmall,tgmed}_$e
+    steps/lmrescore_const_arpa.sh 
+      --cmd "$decode_cmd" $libri_dir/data/lang_nosp_test_{tgsmall,tglarge} \
+      data/$e/test  $exp_dir/decode${lmcode}_{tgsmall,tglarge}_$e
+    steps/lmrescore_const_arpa.sh \
+      --cmd "$decode_cmd" $libri_dir/data/lang_nosp_test_{tgsmall,fglarge} \
+      data/$e/test  $exp_dir/decode_nosp_{tgsmall,fglarge}_$e
+  fi
   echo 'End of stage 11'
 fi
 
-# train tri3b (LDA+MLLT) on whole librispeech + wsj (nodup)
+# train tri4b (LDA+MLLT) on whole wsj + librispeech_100 (4th triphone pass)
 if [ $stage -eq 12 ]; then
-  #local/make_partitions_wsj_etc.sh --multi $multi --stage 5 || exit 1;
-  steps/align_si.sh --boost-silence 1.25 --nj 100 --cmd "$train_cmd" \
-    data/$multi/tri3a_ali ${lang_root}_nosp exp/$multi/tri3a exp/$multi/tri3a_ali || exit 1;
-  steps/train_lda_mllt.sh --cmd "$train_cmd" \
-    --splice-opts "--left-context=3 --right-context=3" 11500 400000 \
-    data/$multi/tri3b ${lang_root}_nosp exp/$multi/tri3a_ali exp/$multi/tri3b || exit 1;
-  # decode
+  data_train=data/wsj_librispeech100
+  if $combine_data; then
+    utils/combine_data.sh data/wsj_librispeech100 data/{wsj,librispeech_100}/train || { echo "Failed to combine data"; exit 1; }
+    #utils/data/remove_dup_utts.sh 300 data/wsj_librispeech100 $data_dir/wsj_librispeech100_nodup
+  fi
+
+  if $train; then 
+    steps/align_si.sh --boost-silence 1.25 --nj 100 --cmd "$train_cmd" \
+      $data_train ${lang_root}_nosp exp/$multi/tri3b exp/$multi/tri3b_ali || exit 1;
+    steps/train_lda_mllt.sh --cmd "$train_cmd" \
+      --splice-opts "--left-context=3 --right-context=3" 5000 100000 \
+      $data_train ${lang_root}_nosp exp/$multi/tri3b_ali exp/$multi/tri4b || exit 1;
+  fi
+
   if $decode; then
-    gmm=tri3b
+    gmm=tri4b
     graph_dir=exp/$multi/$gmm/graph_tgpr
     utils/mkgraph.sh ${lang_root}_nosp_test_tgpr \
       exp/$multi/$gmm $graph_dir || exit 1;
     for e in wsj librispeech; do
       ## we adapt nj to number of speakers: nspk 
       nspk=$(wc -l <data/$e/test/spk2utt)
-      steps/decode_fmllr.sh --nj 25 --cmd "$decode_cmd" --config conf/decode.config $graph_dir \
+      steps/decode_fmllr.sh --nj $nspk --cmd "$decode_cmd" --config conf/decode.config $graph_dir \
+        data/$e/test exp/$multi/$gmm/decode_tgpr_$e || exit 1;
+    done
+  fi
+fi
+
+# train tri5b (SAT) on whole wsj + librispeech_460 (5th triphone pass)
+if [ $stage -eq 13 ]; then
+  data_train=data/wsj_librispeech460
+  if $combine_data; then
+    utils/combine_data.sh data/wsj_librispeech460 data/{wsj,librispeech_100,librispeech_360}/train || { echo "Failed to combine data"; exit 1; }
+    #utils/data/remove_dup_utts.sh 300 data/wsj_librispeech100 $data_dir/wsj_librispeech100_nodup
+  fi
+
+  if $train; then
+    steps/align_si.sh --boost-silence 1.25 --nj 100 --cmd "$train_cmd" \
+      $data_train ${lang_root}_nosp exp/$multi/tri4b exp/$multi/tri4b_ali || exit 1;
+    steps/train_sat.sh --cmd "$train_cmd" 7000 150000 \
+      $data_train ${lang_root}_nosp exp/$multi/tri4b_ali exp/$multi/tri5b || exit 1;
+  fi
+
+  if $decode; then
+    gmm=tri5b
+    graph_dir=exp/$multi/$gmm/graph_tgpr
+    utils/mkgraph.sh ${lang_root}_nosp_test_tgpr \
+      exp/$multi/$gmm $graph_dir || exit 1;
+    for e in wsj librispeech; do
+      ## we adapt nj to number of speakers: nspk 
+      nspk=$(wc -l <data/$e/test/spk2utt)
+      steps/decode_fmllr.sh --nj $nspk --cmd "$decode_cmd" --config conf/decode.config $graph_dir \
+        data/$e/test exp/$multi/$gmm/decode_tgpr_$e || exit 1;
+    done
+  fi
+fi
+
+# train tri6b (SAT) on whole wsj + librispeech_960 (6th triphone pass)
+if [ $stage -eq 14 ]; then
+  data_train=data/wsj_librispeech960
+  if $combine_data; then
+    utils/combine_data.sh data/wsj_librispeech960 data/{wsj,librispeech_100,librispeech_360,librispeech_500}/train || { echo "Failed to combine data"; exit 1; }
+    #utils/data/remove_dup_utts.sh 300 data/wsj_librispeech100 $data_dir/wsj_librispeech100_nodup
+  fi
+
+  if $train; then
+    steps/align_si.sh --boost-silence 1.25 --nj 100 --cmd "$train_cmd" \
+      $data_train ${lang_root}_nosp exp/$multi/tri5b exp/$multi/tri5b_ali || exit 1;
+    steps/train_sat.sh --cmd "$train_cmd" 11000 400000 \
+      $data_train ${lang_root}_nosp exp/$multi/tri5b_ali exp/$multi/tri6b || exit 1;
+  fi
+
+  if $decode; then
+    gmm=tri6b
+    graph_dir=exp/$multi/$gmm/graph_tgpr
+    utils/mkgraph.sh ${lang_root}_nosp_test_tgpr \
+      exp/$multi/$gmm $graph_dir || exit 1;
+    for e in wsj librispeech; do
+      ## we adapt nj to number of speakers: nspk 
+      nspk=$(wc -l <data/$e/test/spk2utt)
+      steps/decode_fmllr.sh --nj $nspk --cmd "$decode_cmd" --config conf/decode.config $graph_dir \
         data/$e/test exp/$multi/$gmm/decode_tgpr_$e || exit 1;
     done
   fi
 fi
 
 # reestimate pron & sil-probs
-dict_affix=${multi}_tri3b
-if [ $stage -eq 13 ]; then
-  gmm=tri3b
-  steps/get_prons.sh --cmd "$train_cmd" data/$multi/$gmm ${lang_root}_nosp exp/$multi/$gmm
-  utils/dict_dir_add_pronprobs.sh --max-normalize true \
-    ${dict_root}_nosp exp/$multi/$gmm/pron_counts_nowb.txt \
-    exp/$multi/$gmm/sil_counts_nowb.txt exp/$multi/$gmm/pron_bigram_counts_nowb.txt ${dict_root}_${dict_affix}
-  utils/prepare_lang.sh ${dict_root}_${dict_affix} "<unk>" data/local/lang_${dict_affix} ${lang_root}_${dict_affix}
+dict_affix=${multi}_tri6b
+if [ $stage -eq 15 ]; then
+  data_train=data/wsj_librispeech960
+  gmm=tri6b
+  #steps/get_prons.sh --cmd "$train_cmd" $data_train ${lang_root}_nosp exp/$multi/$gmm
+  #utils/dict_dir_add_pronprobs.sh --max-normalize true \
+  #  ${dict_root}_nosp exp/$multi/$gmm/pron_counts_nowb.txt \
+  #  exp/$multi/$gmm/sil_counts_nowb.txt exp/$multi/$gmm/pron_bigram_counts_nowb.txt ${dict_root}_${dict_affix}
+  #utils/prepare_lang.sh ${dict_root}_${dict_affix} "<UNK>" data/local/lang_${dict_affix} ${lang_root}_${dict_affix}
+
   utils/format_lm_sri.sh --srilm-opts "$srilm_opts" \
-    ${lang_root}_${dict_affix} data/local/lm/3gram-mincount/lm_unpruned.gz \
+    ${lang_root}_${dict_affix} data/local/lm/3gram-mincount/lm_pr6.0.gz \
     ${dict_root}_${dict_affix}/lexicon.txt ${lang_root}_${dict_affix}_test_tgpr
+    #${lang_root}_${dict_affix} data/local/lm/3gram-mincount/lm_unpruned.gz \
+    #${dict_root}_${dict_affix}/lexicon.txt ${lang_root}_${dict_affix}_test_tgpr
   # decode
   if $decode; then
-    gmm=tri3b
+    gmm=tri6b
     graph_dir=exp/$multi/$gmm/graph_tgpr_sp
     utils/mkgraph.sh ${lang_root}_${dict_affix}_test_tgpr \
       exp/$multi/$gmm $graph_dir || exit 1;
@@ -359,11 +429,15 @@ fi
 
 dict_affix=nosp
 lang=${lang_root}_${dict_affix}
-if [ $stage -eq 14 ]; then
+if [ $stage -eq 16 ]; then
   # This does the actual data cleanup.
   steps/cleanup/clean_and_segment_data.sh --stage $cleanup_stage --nj 100 --cmd "$train_cmd" \
-  data/tedlium/train $lang exp/$multi/tri3b exp/$multi/tri3b_tedlium_cleaning_work data/$multi/tedlium_cleaned/train
+  data/tedlium/train $lang exp/$multi/tri6b exp/$multi/tri6b_tedlium_cleaning_work data/$multi/tedlium_cleaned/train
 fi
 
-exit 0
+if [ $stage -le 17 ]; then 
+  for x in exp/multi_m/tri*/decode_*; do [ -d $x ] && grep WER $x/wer_* | utils/best_wer.sh; done > RESULTS_marta
+fi
+
+#exit 0
 

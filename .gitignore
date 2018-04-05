@@ -1,9 +1,14 @@
 ## some experiment files I don't want to track
-run_wsj_etc.sh
-run_ls_ted.sh
-## data, experiemnts and RESULTS files
+s5/run_wsj_etc.sh
+s5/run_ls_ted.sh
+m5/run.sh
+## data, mfcc experiemnts and RESULTS files
 s5/data
 s5/exp
+s5/mfcc
+m5/data
+m5/exp
+m5/mfcc
 RESULTS_marta
 ## log output files
 *.out
