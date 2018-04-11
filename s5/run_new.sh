@@ -26,7 +26,7 @@ fi
 # general options
 stage=11
 cleanup_stage=1
-multi=multi_m  # This defines the "variant" we're using; see README.md
+multi=multi_wsj  # This defines the "variant" we're using; see README.md
 #srilm_opts="-subset -prune-lowprobs -unk -tolower -order 3"
 combine_data=false
 train_mono=false
@@ -74,7 +74,7 @@ fi
 # And prepare Language Model
 if [ $stage -eq 2 ]; then
   # We prepare the basic dictionary in data/local/dict_combined.
-  local/new_prepare_dict.sh $wsj1 $librispeech
+  local/new_prepare_dict.sh "wsj" wsj1 $librispeech
 fi
 
 # We'll do multiple iterations of pron/sil-prob estimation. So the structure of
@@ -103,7 +103,7 @@ fi
 
 if [ $stage -eq 4 ]; then
   # Setup LM directory
-  lm_dir=data/local/lm
+  lm_dir=data/local/lm/lm_wsj
   mkdir -p $lm_dir
 
   # build LM and prepare test lang directories

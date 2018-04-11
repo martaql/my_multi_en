@@ -21,9 +21,9 @@ else
 fi
 
 [ ! -d "$lm_srcdir_3g" ] && echo "No such dir $lm_srcdir_3g" && exit 1;
-[ ! -d "$lm_srcdir_4g" ] && echo "No such dir $lm_srcdir_4g" && exit 1;
+#[ ! -d "$lm_srcdir_4g" ] && echo "No such dir $lm_srcdir_4g" && exit 1;
 
-for d in data/lang${lang_suffix}_test_bd_{tg,tgpr,tgconst,fg,fgpr,fgconst}; do
+for d in data/lang${lang_suffix}_test_bd_{tg,tgpr}; do #,tgconst,fg,fgpr,fgconst}; do
   rm -r $d 2>/dev/null
   cp -r data/lang${lang_suffix}_bd $d
 done
@@ -58,6 +58,8 @@ gunzip -c $lm_srcdir_3g/lm_unpruned.gz | \
   arpa2fst --disambig-symbol=#0 \
            --read-symbol-table=$lang/words.txt - data/lang${lang_suffix}_test_bd_tg/G.fst || exit 1;
   fstisstochastic data/lang${lang_suffix}_test_bd_tg/G.fst
+
+exit 0
 
 # Build ConstArpaLm for the unpruned language model.
 gunzip -c $lm_srcdir_3g/lm_unpruned.gz | \
